@@ -1,20 +1,14 @@
 from copy import deepcopy
 from datetime import datetime
-# from datetime import timedelta
 
 import click
 import numpy as np
 import pandas as pd
 import re
 
-
 # pd.options.mode.chained_assignment = None
 
 OPTION_LISTS_TRANSLATION = True
-
-
-# PM file (exported)
-#### TODO: 說明如何匯出檔案
 
 DEFAULT_PM_FILENAME = r"PocketMoney.csv"
 DEFAULT_MOZE_FILENAME = r"MOZE.csv"
@@ -76,9 +70,7 @@ COL_MAPPING_TABLE = {
 
 def load_pm2_csvfile(input_file):
   
-    try:
-        # print(input_file)
-        # df = pd.read_csv(DEFAULT_PM_FILENAME, skiprows=0,thousands=',')        
+    try:   
         df = pd.read_csv(input_file, skiprows=0,thousands=',')
 
         if DEBUG_mode:
@@ -94,20 +86,12 @@ def determine_record_type(df):
 
     # determine record type (記錄類型)
     # 判斷記錄類型為支出/收入/轉出/轉入 (PM無 應收款項 / 應付款項 / 餘額調整 / 退款)
-    # 先用金額正/負來判斷支出/收入，但可能造成同一類別名稱出現在收入與支出
-    # MOZE 支出/收入可以有同名的類別，但是無法像PM一樣支出類別為正數 (或收入類別為負數)
-    # 所以碰到像現金回饋(收入)要歸到交易手續費(支出)就麻煩了...
-    # 要先想好怎麼轉…
-    # 在moze app裡是用"折扣 & 手續費"來處理 
-    # ex: 手續費回饋，支出 金額=0，折扣=50
-    # ex2: 退費，支出 金額=0，折扣=680
     # 如何判斷 PM 的帳戶類型？ PM的帳戶無收入/支出帳戶的概念，而是用金額正負來顯示金流
     # 方法1: 統計交易次數，負的居多則定義為支出
     # 方法2：統計交易金額累計正負，若以負的居多則定義為支出
 
     # 先使用方法2    
     tmp = df.loc[:,['Category','Amount']].groupby('Category').sum()
-    # print(tmp)
 
     # save expense list for comparison
     category_type_expense = tmp[tmp['Amount']<0]
@@ -116,11 +100,6 @@ def determine_record_type(df):
         expense_list.append(cat)
 
     df['is_expense'] = df['Category'].isin(expense_list)
-
-    # DIRTY: There is a bug in my exported csv, don't know why
-    # a lot "<0 Cash>" records in payee become "0 Cash" after exported
-    # Need manually modification
-    # df.loc[df['Payee']==r'0 Cash','Payee']= r'<' + df['Payee'] + r'>'
     
     # find transfer in and out using Payee   
     df['is_transfer_in'] = df['Payee'].str.startswith('<') & df['Payee'].str.endswith('>') & df['Amount'].ge(0)
@@ -159,7 +138,6 @@ def fix_transfer_missing(df):
     xfer_df['Payee'] = xfer_df['Payee'].str.strip('>')
     xfer_df['Payee'] = xfer_df['Payee'].str.strip('<')
 
-    # 不排序好像有點問題，還是排一下好了
     xfer_df['Amount_abs'] = xfer_df['Amount'].abs()  # 金額不一定準，因為有跨幣種轉帳的問題
     # 產生 (Account_from)_(Accout_to) 用來比對
     ap_gen1 = lambda s1, s2: str(s1) + '-' + str(s2)
@@ -169,11 +147,9 @@ def fix_transfer_missing(df):
     xfer_df.loc[xfer_df['is_transfer_in']==True,'Account_pair'] = xfer_df['Account'].combine(xfer_df['Payee'],ap_gen2 )
     xfer_df.sort_values(by=['Date', 'Memo', 'Account_pair', 'Amount_abs'], inplace=True)
     xfer_df.reset_index(inplace=True)
-    # xfer_df.sort_values(by=['pair_serial']).to_excel(DEBUG_TMP_EXCEL,engine='xlsxwriter')
 
     # 逐行掃過，找出落單的，加上一行對應的轉出入 (現金，金額為零)
-    # 並將配對好的，加上flag
-       
+    # 並將配對好的，加上flag       
     xfer_df['is_paired'] = False
     xfer_df['pair_serial'] = np.nan
     xfer_df['pair_type']= 0     # 1=轉出 2=轉入
@@ -214,20 +190,11 @@ def fix_transfer_missing(df):
 
         if (chk1|chk2) & chk3 & chk4 & chk5 & chk6 :
             # 轉入轉出配成組Paired
-            # print(str(cur_id) + ' paired! ' + pre_datetime_str + 'vs' + cur_datetime_str)
             # 同一組的紀錄不用改時間，用 pair_serial 寫入未來排序即可
             
             xfer_df.loc[[pre1_id,cur_id],'is_paired']= True                    
             xfer_df.loc[[pre1_id, cur_id],'pair_serial']= pair_serial
-            # xfer_df.loc[pre1_id,'pair_serial']= pair_serial            
             pair_serial = pair_serial + 1
-
-            # if chk2==True:
-            #     xfer_df.loc[pre1_id,'pair_type'] = 1
-            #     xfer_df.loc[cur_id,'pair_type'] = 2                
-            # else:
-            #     xfer_df.loc[pre1_id,'pair_type'] = 2
-            #     xfer_df.loc[cur_id,'pair_type'] = 1
 
         else :
 
@@ -276,23 +243,13 @@ def fix_transfer_missing(df):
     # case 2: 轉帳時 Amount 是等效台幣的數字，所以要先用匯率換算回去該幣種的實際數字
     # case 3: 轉帳時 轉進轉出的幣種是相反的，所以必須對調。但對調時幣除了幣種之外，對應的數字也要跟著對調，還要修正正負號...
     # case 4: 若一開始沒有成對的紀錄 (後來補0的)，則必須避開，不對調金額
-    # case 5: 若兩者幣種相同，仍然要依匯率換算，但不要對調金額
-    
-    # for PM2 the Amount(NTD) = CurrencyCode (USD) * ExchangeRate
-    # for Moze the Amount is base on CurrencyCode
-    # So in PM2 will be Amount=10000 (NTD), CurrencyCode=USD, ExchangeRate=30.09
-    # in Moze should be Amount=3323.36 (USD), CurrencyCode=USD
-    # df['Amount']= df['Amount'] / df['ExchangeRate']
-    
+    # case 5: 若兩者幣種相同，仍然要依匯率換算，但不要對調金額  
     
     xfer_df_out = xfer_df.loc[xfer_df['is_transfer_out']==True].sort_values(by=['pair_serial']).reset_index(drop=True)
     xfer_df_in = xfer_df.loc[xfer_df['is_transfer_in']==True].sort_values(by=['pair_serial']).reset_index(drop=True)
     
     if xfer_df_out.size != xfer_df_in.size:
         print('WARNING! Size of xfer_df_out and xfer_df_in is different')
-
-    # xfer_df_out.to_excel(DEBUG_TMP_EXCEL+'_out.xlsx',engine='xlsxwriter')
-    # xfer_df_in.to_excel(DEBUG_TMP_EXCEL+'_in.xlsx',engine='xlsxwriter')
 
     # calculate real amount according ExchangeRate
     xfer_df_out['Amount']= xfer_df_out['Amount'] / xfer_df_out['ExchangeRate']
@@ -308,14 +265,7 @@ def fix_transfer_missing(df):
     tmp_col = xfer_df_in['Amount'].where(xfer_df_out['CurrencyCode']==xfer_df_in['CurrencyCode'], xfer_df_out['Amount']  * -1 )
     xfer_df_out['Amount'] = tmp_col2.copy() 
     xfer_df_in['Amount'] = tmp_col.copy()
-
-    # xfer_df_out.to_excel(DEBUG_TMP_EXCEL+'_out2.xlsx',engine='xlsxwriter')
-    # xfer_df_in.to_excel(DEBUG_TMP_EXCEL+'_in2.xlsx',engine='xlsxwriter')
-
     xfer_df = xfer_df_out.append(xfer_df_in, sort=False)
-
-    # xfer_df_db = xfer_df.sort_values(by=['pair_serial'])
-    # xfer_df_db.to_excel(DEBUG_TMP_EXCEL,engine='xlsxwriter')
 
     # dear w/ amount for non-xfer
     non_xfer_df['Amount']= non_xfer_df['Amount'] / non_xfer_df['ExchangeRate']
@@ -338,8 +288,7 @@ def get_pm_all_lists(df):
     # disabled by default
 
     df_lists = pd.DataFrame(columns=['PM_Category','Moze_Category','PM_Account','Moze_Account','PM_Payee','Moze_Payee'])
-    # df_lists = pd.DataFrame()
-     
+
     tmp_df = df
     tmp1= tmp_df['Category'].drop_duplicates().sort_values().reset_index(drop=True)
     tmp_df = df
@@ -350,13 +299,10 @@ def get_pm_all_lists(df):
     tmp_df['is_Payee'] = df['Payee'].str.startswith('<') & df['Payee'].str.endswith('>')
     tmp_df['Payee'] = tmp_df['Payee'].mask(tmp_df['is_Payee'])
     tmp3 = tmp_df['Payee'].drop_duplicates().sort_values().reset_index(drop=True)    
-    # print(tmp3)
 
     tmp_lists = pd.concat([tmp1,tmp2,tmp3],axis=1)   
-    # print(tmp_lists)
     df_lists[['PM_Category','PM_Account','PM_Payee']] = tmp_lists[['Category','Account','Payee']]
-    # print(df_lists)
-    # df_lists.to_excel(DEFAULT_PM_ALL_LISTS,engine='xlsxwriter',index=False)
+
     return df_lists
 
     
@@ -367,7 +313,6 @@ def determine_category(df):
     
     # split main and sub category
     splited = df['Category'].str.split(pat=':',n=2,expand=True )
-    # print(splited.head(30))
 
     # write expense category
     df.loc[df['is_expense']==True, "Category_Main"] = splited[0]
@@ -417,7 +362,6 @@ def translate_lists(df):
     # for Moze it will become "飲食:午餐"
 
     # read mapping file from file (excel)
-    #### TODO: test if file is exist
     try:
         map_df = pd.read_excel(DEFAULT_PM_LISTS_TRANSLATED)
     except:
@@ -474,8 +418,6 @@ def pm2moze_col_mapping(pm_df, moze_df):
     for pm_col,moze_col in COL_MAPPING_TABLE.items() :
         moze_df[moze_col] = pm_df[pm_col]
 
-
-    # print(moze_df.tail(30))
     if DEBUG_mode:
         moze_df.to_excel(DEBUG_MOZE_MAPPED,engine='xlsxwriter',index=False)
 
@@ -497,7 +439,6 @@ def final_check_moze_df(moze_df):
 @click.option("--output_file",'-o', default=DEFAULT_MOZE_FILENAME, help="Output filename for Moze 3.0",show_default=True)
 @click.option("--translation/--no-translation", default=True, help=f"Translation list defined in {DEFAULT_PM_LISTS_TRANSLATED}", show_default=True)
 @click.option('--debug', is_flag=True, help="DEBUG mode: writing temp files for debugging (see DEBUG_filename)")
-# @click.option("--MOZE_file",'-o', prompt="Your name",help="The person to greet.")
 @click.pass_context
 def cli(ctx,input_file,output_file, translation, debug ):
     # ensure that ctx.obj exists and is a dict (in case `cli()` is called
@@ -528,7 +469,6 @@ def list(ctx):
     """Generate lists of Category, Account, and Payee."""
    
     input_file = ctx.obj["input_file"]
-    # DEBUG_mode= ctx.obj["DEBUG"]
     
     click.echo(f"Loading lists from input file: {input_file}")
     df = load_pm2_csvfile(input_file)
@@ -536,8 +476,6 @@ def list(ctx):
         # click.echo(f'ERROR: List is empty!')
         return
     
-    # moze_df = pd.DataFrame(columns=MOZE_HEADER)      
-
     click.echo(f"Determining record type...")
     determine_record_type(df)
     click.echo(f"Fixing non-paired transfer record...")
@@ -572,10 +510,7 @@ def convert(ctx):
 
     input_file = ctx.obj["input_file"]
     output_file = ctx.obj["output_file"]
-    OPTION_LISTS_TRANSLATION = ctx.obj["TRANSLATION"]
-    # DEBUG_mode= ctx.obj["DEBUG"]
-    # print(DEBUG_mode)
-    
+    OPTION_LISTS_TRANSLATION = ctx.obj["TRANSLATION"]  
 
     click.echo(f"Loading input CSV file: {input_file}")
     df = load_pm2_csvfile(input_file)
@@ -614,14 +549,9 @@ def convert(ctx):
             moze_df.to_excel(DEBUG_MOZE_FILENAME_EXCEL,engine='xlsxwriter',index=False)        
 
     except :
-        # print(f"Error Writing output_file: {output_file}\nexit...")
         click.echo(f"\nERROR:\nSomething wrong while writing output file({output_file})!\nPlease check if file is opened or permission is incorrect.")
 
         pass
-
-    # df.to_excel(DEFAULT_MOZE_FILENAME_EXCEL,engine='xlsxwriter',index=False)
-  
-    
     
 
 if __name__ == '__main__':
