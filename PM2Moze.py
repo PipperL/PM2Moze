@@ -421,7 +421,7 @@ def translate_lists(df):
     try:
         map_df = pd.read_excel(DEFAULT_PM_LISTS_TRANSLATED)
     except:
-        click.echo(f"ERROR: cannont open {DEFAULT_PM_LISTS_TRANSLATED} for translation")
+        click.echo(f"ERROR: cannont open {DEFAULT_PM_LISTS_TRANSLATED} for translation, SKIPPING Translation...")
         return
         
     CAT_MAPPING_TABLE_FROM_FILE={}
@@ -496,7 +496,7 @@ def final_check_moze_df(moze_df):
 @click.option("--input_file",'-i', default=DEFAULT_PM_FILENAME, help=f"Input filename from PM2",show_default=True)
 @click.option("--output_file",'-o', default=DEFAULT_MOZE_FILENAME, help="Output filename for Moze 3.0",show_default=True)
 @click.option("--translation/--no-translation", default=True, help=f"Translation list defined in {DEFAULT_PM_LISTS_TRANSLATED}", show_default=True)
-@click.option('--debug', is_flag=True, help="DEBUG mode: writing temp files for debugging (see debug.filename)")
+@click.option('--debug', is_flag=True, help="DEBUG mode: writing temp files for debugging (see DEBUG_filename)")
 # @click.option("--MOZE_file",'-o', prompt="Your name",help="The person to greet.")
 @click.pass_context
 def cli(ctx,input_file,output_file, translation, debug ):
